@@ -20,15 +20,16 @@ data WTag
   | TBuiltinCons -- `__CONS__: a -> UTup -> UTup`
   | TCon | TFun | TArg | TRes -- `Con`, `Fun`, `arg`, `res`
   | TMember | TEq | TInst -- `(::)`, `(~)`, `(<=|)`
-  | TConjunct -- `(/\)`
-  | TUnion | TIntersection -- `(|)`, `(&)`
-  | TUnitTy | TTy | TCo  -- `Unit: Ty`, `Ty`, `Co`
+  | TConjunct -- `(/\): (Co, Co) -> Co`
+  | TUnion | TIntersection -- `(|): (Ty, Ty) -> Ty`, `(&): (Ty, Ty) -> Ty`
+  | TUnitTy | TTy | TCo  -- `Unit: Ty`, `Ty: Ty`, `Co: Ty`
   -- instable = inst-able = instance-able
   --          = unstable
   -- I like puns ¯\_(ツ)_/¯
-  | TInstable | TOpen | TClosed -- `Instable`
-  | T Nat -- All identifiers from the source-program are enumerated and become
-          -- `T Nat`s
+  | TInstable | TOpen | TClosed -- `Instable: Ty`, `TOpen: Ty`, `TClosed: Ty`
+  -- All identifiers from the source-program are enumerated and become tagged
+  -- `T`s
+  | T Nat
 
 
 mutual
@@ -38,7 +39,12 @@ mutual
     -- For this reason, it is not directly available in source syntax
     -- The only other alternative I think could work is all operator
     -- constructors are arity two - we need some way to pair up values
-    ConsApp : WExp -> WExp -> WExp -> WExp
+    --
+    -- Debatable whether we should actually have a `WExp` that reduces to
+    -- `Tagged TBuiltinCons` as first arg but I'm erring on the side of no. It's
+    -- just redundant information and calling `ConsApp` in an interpret function
+    -- without any mention of builtin-cons is very obviously a bug.
+    ConsApp : WExp -> WUTup -> WExp
     -- Constructor application
     App : (f: WCon) -> (x: WExp) 
         -> {argValid: WDict $ member (arg $ conIsFun f) x} 
@@ -46,19 +52,22 @@ mutual
     -- TODO: Upgrade to `LamCase`
     Lam : WTy -> WExp -> WExp
 
-  -- `WTy` is defined independently of `WTypedExp` make encoding type-in-type
+  -- `WTy` is defined independently of `WTypedExp` to make encoding type-in-type
   -- possible
   data WTy : Type where
     IsTy : (e: WExp) -> {auto d: WDict $ member ty e} -> WTy
 
   WCo : Type
-  WCo = WTypedExp $ co
+  WCo = WTypedExp co
 
   WCon : Type
-  WCon = WTypedExp $ con
+  WCon = WTypedExp con
 
   WFun : Type
   WFun = WTypedExp fun
+
+  WUTup : Type
+  WUTup = WTypedExp utup
 
   data WDict : WCo -> Type where
     DConjunct : forall co1, co2. 
