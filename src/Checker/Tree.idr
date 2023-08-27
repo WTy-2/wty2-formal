@@ -46,9 +46,10 @@ mutual
     -- TODO: Upgrade to `LamCase`
     Lam : WTy -> WExp -> WExp
 
+  -- `WTy` is defined independently of `WTypedExp` make encoding type-in-type
+  -- possible
   data WTy : Type where
     IsTy : (e: WExp) -> {auto d: WDict $ member ty e} -> WTy
-
 
   WCo : Type
   WCo = WTypedExp $ co
@@ -76,15 +77,11 @@ mutual
     DFunInTy : WDict $ member ty (Tagged TFun)
     -- `Con :: Ty`
     DConInTy : WDict $ member ty $ Tagged TCon
-
-  -- Would obviously like to have `WTypedExp` indexed by `WTy` not `WExp` but
-  -- this amount of recursion in definitions in not possible
-
+  
   data WTypedExp : WTy -> Type where
     Is : forall t. (e: WExp) -> {auto d: WDict $ member t e} -> WTypedExp t
 
-  -- Idris2 embedding of WTy2 lang constructs
-
+  -- Idris2 embedding of WTy2 functions/constructors/etc...
   ty : WTy
   ty = IsTy (Tagged TTy)
 
