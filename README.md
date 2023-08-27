@@ -1,5 +1,5 @@
 # wty2-formal
-A an attempt to formalise WTy2's type system inside of Idris2
+An attempt to formalise WTy2's type system inside of Idris2
 
 If it goes well, this could feasibly turn into a WTy2 typechecker/interpreter:
 - Typechecking into an indexed AST is painful (as I experienced during WACC) but also is an extremely powerful way to prevent typechecker bugs (hopefully no need to build a giant test suite)
