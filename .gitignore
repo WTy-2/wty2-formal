@@ -1,1 +1,5 @@
 build
+
+# Experiments with Idris2 as I learn the language which I keep in the same
+# directory as this project for convenience
+src/Experiments

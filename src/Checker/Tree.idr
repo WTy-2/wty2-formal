@@ -30,6 +30,8 @@ data WTag
   | TConjunct -- `(/\): (Co, Co) -> Co`
   | TUnion | TInter -- `(|): (Ty, Ty) -> Ty`, `(&): (Ty, Ty) -> Ty`
   | TUnitTy | TTy | TCo  -- `Unit: Ty`, `Ty: Ty`, `Co: Ty`
+  | TAny -- `Any: Ty`
+  | TFor -- `for: (t: Ty, t -> Co) -> Co`
   -- instable = inst-able = instance-able
   --          = unstable
   -- I like puns ¯\_(ツ)_/¯
@@ -60,12 +62,24 @@ mutual
         -> {argValid: WDict $ member (arg $ conIsFun f) x} 
         -> WExp
     -- TODO: Upgrade to `LamCase`
-    Lam : WTy -> WExp -> WExp
+    -- We need a way of writing patterns (tree of constructors and variables)
+    --
+    -- This definition obviously breaks with allow shadowing. To ensure
+    -- soundness, we would need to write an extrinsic proof that every variable
+    -- in checked programs is unique (hopefully not too difficult if we always
+    -- generate fresh variables at every binder in the renaming pass)
+    Lam : (v: Nat) -> (t: WTy) -> (u: WTy) 
+        -> (WDict (member t $ var v) -> WTypedExp u) -> WExp
+    Var : Nat -> WExp
+
 
   -- `WTy` is defined independently of `WTypedExp` to make encoding type-in-type
   -- possible
   data WTy : Type where
     IsTy : (e: WExp) -> {auto d: WDict $ member ty e} -> WTy
+
+  var : Nat -> WExp
+  var = Var
 
   WCo : Type
   WCo = WTypedExp co
@@ -79,8 +93,8 @@ mutual
   WUTup : Type
   WUTup = WTypedExp utup
 
-
-
+  WAny : Type
+  WAny = WTypedExp any
   
   data WTypedExp : WTy -> Type where
     Is : forall t. (e: WExp) -> {auto d: WDict $ member t e} -> WTypedExp t
@@ -88,17 +102,17 @@ mutual
   data WDict : WCo -> Type where
     DConjunct : forall co1, co2. 
                 WDict co1 -> WDict co2 -> WDict $ conjunct co1 co2
-    DEq : forall e1, e2. WDict $ eq e1 e2
+    DEq : forall e. WDict $ eq e e
     -- Axioms:
     -- for[a, b](x: a, y: b) { (x, y) :: PairTy(a, b)
     DPairInPairTy : forall a, b, x, y
                   . {auto xInA: WDict $ member a x} 
-                  -> {auto yInB: WDict (member b y)} 
+                  -> {auto yInB: WDict $ member b y} 
                   -> WDict $ member (pairTy a b) (pair x y)
     -- Con <: Fun
     -- TODO: We use the direct forall encoding here because we haven't actually
     -- defined subtyping yet!
-    DConSubFun : forall f. {fInCon: WDict $ member con f} 
+    DConSubFun : forall f. {auto fInCon: WDict $ member con f} 
                -> WDict $ member fun f
     -- `(::) :: Fun`
     DMemberInFun : WDict . member fun $ Tagged TMember
@@ -112,8 +126,14 @@ mutual
     DFunInTy : WDict . member ty $ Tagged TFun
     -- `Con :: Ty`
     DConInTy : WDict . member ty $ Tagged TCon
+    -- `Any :: Ty`
+    DAnyInTy : WDict . member ty $ Tagged TAny
+    DTySubAny : forall t, x. {auto xInT: WDict $ member t x}
+              -> WDict $ member any x
     -- `for(x: Any, y: UTup) { __CONS__(x)(y) :: UTup }`
     DConsInUTup : forall x, y. WDict . member utup $ ConsApp x y
+    -- for(t: Ty, u: Ty, b: t -> u) { { \x: t |-> b(x) } :: Fun }
+    DLamInFun : forall v, t, u, b. WDict $ member fun (Lam v t u b)
     -- `(|) :: Con`
     DUnionInCon : WDict . member con $ Tagged TUnion
     DNextLvl : forall c. WDict2 c -> WDict c
@@ -154,13 +174,17 @@ mutual
   pair x y = builtinCons x $ Is (builtinCons y unit) {d=DConsInUTup}
 
   -- A couple possible definitions - first is definitely neater though...
-  -- Pair(a, b) 
-  --   = [x: a, y: b] '(x :. y :. ()) 
-  --   = (p: UTup) <<= { length(i) ~ 2 /\ (p ! 0) :: a /\ (p ! 1) :: b }
+  -- > Pair(a, b) 
+  -- >   = [x: a, y: b] '(x :. y :. ()) 
+  -- >   = (p: UTup) <<= { length(i) ~ 2 /\ (p ! 0) :: a /\ (p ! 1) :: b }
   pairTy : WTy -> WTy -> WTy
 
 
   eq : WExp -> WExp -> WCo
+
+  -- t <: u = for(x: t) { x :: u }
+  sub : WTy -> WTy -> WCo
+  
 
   proj : forall t. WTypedExp t -> WExp
   proj (Is x) = x
@@ -172,23 +196,30 @@ mutual
   fun = IsTy $ Tagged TFun
 
   any : WTy
+  any = IsTy $ Tagged TAny
 
   -- This not being total will be a pain to fix
   -- To avoid having tons of functions that do `impossible` matches on every
-  -- built-in, we really need some more sophisticated why to query types and
-  -- dictionaries.
+  -- axiom dictionary (e.g: `arg (Is _ {d=DTyInTy}) impossible`), we will need 
+  -- to restructure somehow.
   0 arg : WFun -> WTy
   arg (Is (Tagged TMember) {d=DMemberInFun}) = pairTy any ty
   arg (Is (Tagged TUnion) {d=DConSubFun {f=Tagged TUnion}}) 
     = pairTy ty ty
+  arg (Is (Lam _ t _ _)) = t
   arg _ = ?todo2
 
+  0 res : WFun -> WTy
+  res (Is (Lam _ _ u _)) = u
+  res _ = ?todo3
+  
+
   -- Function application
-  app : (f: WFun) -> (x: WExp) -> {argValid: WDict $ member (arg f) x} -> WExp
+  app : (f: WFun) -> (x: WTypedExp $ arg f) -> WTypedExp $ res f
 
   infix 0 $$
 
-  ($$) : (f: WFun) -> (x: WExp) -> {argValid: WDict $ member (arg f) x} -> WExp
+  ($$) : (f: WFun) -> (x: WTypedExp $ arg f) -> WTypedExp $ res f
   ($$) = app
 
 
