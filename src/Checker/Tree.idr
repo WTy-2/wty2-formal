@@ -110,19 +110,19 @@ mutual
     DConSubFun : forall f. {auto fInCon: WDict $ member con f} 
                -> WDict $ member fun f
     -- `(::) :: Fun`
-    DMemberInFun : WDict . member fun $ Tagged TMember
+    DMemberInFun : WDict $ member fun $ Tagged TMember
     -- `() :: UTup`
-    DUnitInUTup : WDict . member utup $ Tagged TUnit
+    DUnitInUTup : WDict $ member utup $ Tagged TUnit
     -- `Ty :: Ty`
-    DTyInTy : WDict . member ty $ Tagged TTy
+    DTyInTy : WDict $ member ty $ Tagged TTy
     -- `Co :: Ty`
-    DCoInTy : WDict . member ty $ Tagged TCo
+    DCoInTy : WDict $ member ty $ Tagged TCo
     -- `Fun :: Ty`
-    DFunInTy : WDict . member ty $ Tagged TFun
+    DFunInTy : WDict $ member ty $ Tagged TFun
     -- `Con :: Ty`
-    DConInTy : WDict . member ty $ Tagged TCon
+    DConInTy : WDict $ member ty $ Tagged TCon
     -- `Any :: Ty`
-    DAnyInTy : WDict . member ty $ Tagged TAny
+    DAnyInTy : WDict $ member ty $ Tagged TAny
     DTySubAny : forall t, x. {auto xInT: WDict $ member t x}
               -> WDict $ member any x
     -- `for(x: Any, y: UTup) { x :> y :: UTup }`
@@ -130,10 +130,11 @@ mutual
     -- for(t: Ty, u: Ty, b: t -> u) { { \x: t |-> b(x) } :: Fun }
     DLamInFun : forall v, t, u, b. WDict $ member fun (Lam v t u b)
     -- `(|) :: Con`
-    DUnionInCon : WDict . member con $ Tagged TUnion
+    DUnionInCon : WDict $ member con $ Tagged TUnion
     -- `' :: Con`
-    DPromoteInCon : WDict . member con $ Tagged TPromote 
-    -- `for(x) { x :: Any }`
+    DPromoteInCon : WDict $ member con $ Tagged TPromote 
+    -- `for(f: Con, x: arg(f)) { f(x) :: res(f) }`
+    DAppliedInRes : forall f, x. WDict $ member (res $ conIsFun f) (App f x)
     DNextLvl : forall c. WDict2 c -> WDict c
 
   WDict2 : WCo -> Type
@@ -199,23 +200,31 @@ mutual
   res (Is (Lam _ _ u _)) = u
   res _ = ?todo3
   
-  App' : (f: WCon) -> (x: WExp) 
-        -> {auto argValid: WDict $ member (arg $ conIsFun f) x} 
+  AppCon : (f: WCon) -> (x: WTypedExp $ arg $ conIsFun f) 
         -> WExp
+  AppCon = App
   
+  -- AppRes : (f: WCon) -> (x: WExp)
+
   fun : WTy
   fun = IsTy $ Tagged TFun
 
   isFun : (e: WExp) -> {auto d: WDict $ member fun e} -> WFun
   isCon : (e: WExp) -> {auto d: WDict $ member con e} -> WCon
 
+  IsTyped : forall t. (e: WExp) -> {auto d: WDict $ member t e} -> WTypedExp t
+  IsTyped = Is
+
   -- Apply curried constructor (operator constructor)
   BiApp : (f: WCon) -> (x: WExp) 
         -> { auto xIsArg: WDict $ member (arg $ conIsFun f) x } 
-        -> { auto fIsArityTwo: WDict . member con $ App' f x }
+        -> { auto fIsArityTwo: WDict $ member con $ AppCon f (IsTyped x) }
         -> (y: WExp) 
-        -> { auto yIsArg: WDict $ member (arg . conIsFun $ isCon (App' f x)) y }
+        -> { auto yIsArg: WDict $ member (
+          arg $ conIsFun $ isCon $ AppCon f $ IsTyped x
+        ) y }
         -> WExp
+  -- BiApp f x y = App f x
 
 
   -- union (IsTy x) (IsTy y) = IsTy (App (Is $ Tagged TUnion) $ pair x y)
@@ -304,7 +313,7 @@ mutual
   -- these axioms
   data WDict2_ : WCo -> Type where
     -- TODO: Work out if this axiom is even necessary - could we just rely on
-    -- `res`?
+    -- `res` and the `DAppliedInRes` axiom?
     -- `for(x: Ty, y: Ty) { x | y :: Ty }`
     DUnionedInTy : forall x, y
               . {xInTy: WDict $ member ty x} -> {yInTy: WDict $ member ty y} 
