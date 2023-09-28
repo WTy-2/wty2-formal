@@ -1,6 +1,10 @@
 module Checker.Tree
 
 import Data.So
+import Checker.Utils 
+
+-- Not sure what `Prelude.App` does, but name collisions are bad!
+%hide Prelude.App
 
 %unbound_implicits off
 
@@ -8,11 +12,6 @@ import Data.So
 -- It is very much a work-in-progress but Idris2 has proved itself to be a much
 -- nicer language for doing this sort of thing than Haskell (GADTs have their
 -- limits)
-
--- We intentionally DO NOT handle scoping rules as the types are already more
--- than complicated enough. We simply assume all names are unique and scoping
--- is correct.
-
 
 
 -- High level design question - should the functions here all use zero quantity?
@@ -22,13 +21,12 @@ import Data.So
 data WCtx : Type where
 
 data WTag 
-  = TCons | TUnit -- , `(:.): (a, UTup) -> UTup`, `(): Unit` 
-  | TBuiltinCons -- `__CONS__: a -> UTup -> UTup`
+  = TCons | TUnit -- `(:.): a -> UTup -> UTup`, `(): Unit` 
   | TCon | TFun -- `Con: Ty`, `Fun: Ty`
   | TArg | TRes --`arg: Fun -> Ty`, `res: Fun -> Ty`
-  | TMember | TEq | TInst -- `(::)`, `(~)`, `(<=|)`
-  | TConjunct -- `(/\): (Co, Co) -> Co`
-  | TUnion | TInter -- `(|): (Ty, Ty) -> Ty`, `(&): (Ty, Ty) -> Ty`
+  | TMember | TEq -- `(::): Any -> Ty -> Co`, `(~): Any -> Any -> Co`
+  | TConjunct -- `(/\): Co -> Co -> Co`
+  | TUnion | TInter -- `(|): Ty -> Ty -> Ty`, `(&): Ty -> Ty -> Ty`
   | TUnitTy | TTy | TCo  -- `Unit: Ty`, `Ty: Ty`, `Co: Ty`
   | TAny -- `Any: Ty`
   | TFor -- `for: (t: Ty, t -> Co) -> Co`
@@ -36,7 +34,7 @@ data WTag
   --          = unstable
   -- I like puns ¯\_(ツ)_/¯
   | TInstable | TOpen | TClosed -- `Instable: Ty`, `TOpen: Ty`, `TClosed: Ty`
-  | TPromote | TCoBy -- `('): Any -> Type`, `(<<=): (t: Ty, Co(t)) -> Ty`
+  | TPromote | TCoBy -- `('): Any -> Type`, `(<<=): (t: Ty) -> Co(t) -> Ty`
   -- All identifiers from the source-program are enumerated and become tagged
   -- `T`s
   | T Nat
@@ -45,21 +43,9 @@ data WTag
 mutual
   data WExp : Type where
     Tagged : WTag -> WExp
-    -- `TBuiltinCons` is special - it is the only constructor of arity >1
-    -- For this reason, it is not directly available in source syntax.
-    --
-    -- The only other reasonablle alternative I think could work is to have all
-    -- operator constructors be of arity two - we need some way to pair up
-    -- values.
-    --
-    -- Debatable whether we should actually have a `WExp` that reduces to
-    -- `Tagged TBuiltinCons` as first arg but I'm erring on the side of no. It's
-    -- just redundant information and calling `ConsApp` in an interpret function
-    -- without any mention of builtin-cons is very obviously a bug.
-    ConsApp : WExp -> WUTup -> WExp
     -- Constructor application
-    App : (f: WCon) -> (x: WExp) 
-        -> {argValid: WDict $ member (arg $ conIsFun f) x} 
+    App : (f: WCon) -> WTypedExp (arg $ conIsFun f)
+        -- -> {auto argValid: WDict $ member (arg $ conIsFun f) x} 
         -> WExp
     -- TODO: Upgrade to `LamCase`
     -- We need a way of writing patterns (tree of constructors and variables)
@@ -99,10 +85,19 @@ mutual
   data WTypedExp : WTy -> Type where
     Is : forall t. (e: WExp) -> {auto d: WDict $ member t e} -> WTypedExp t
 
+  -- We could try and unify `WDict` and `WExp`, thereby defining a core language
+  -- where constraints and types are one and the same.
+  -- This might become too recursive though (evidence that an expression is a
+  -- member of a type is carried with a dictionary, which would then also be
+  -- an expression - but then we need a dictionary to carry evidence that that
+  -- dictionary is of the correct type etc...)
   data WDict : WCo -> Type where
     DConjunct : forall co1, co2. 
                 WDict co1 -> WDict co2 -> WDict $ conjunct co1 co2
     DEq : forall e. WDict $ eq e e
+
+    DInst : forall o, i. {iIsTy: WDict $ member ty i} -> WInstDict o (IsTy i) 
+                       -> WDict $ member o i
     -- Axioms:
     -- for[a, b](x: a, y: b) { (x, y) :: PairTy(a, b)
     DPairInPairTy : forall a, b, x, y
@@ -130,12 +125,15 @@ mutual
     DAnyInTy : WDict . member ty $ Tagged TAny
     DTySubAny : forall t, x. {auto xInT: WDict $ member t x}
               -> WDict $ member any x
-    -- `for(x: Any, y: UTup) { __CONS__(x)(y) :: UTup }`
-    DConsInUTup : forall x, y. WDict . member utup $ ConsApp x y
+    -- `for(x: Any, y: UTup) { x :> y :: UTup }`
+    -- DConsInUTup : forall x, y. WDict . member utup $ ConsApp x y
     -- for(t: Ty, u: Ty, b: t -> u) { { \x: t |-> b(x) } :: Fun }
     DLamInFun : forall v, t, u, b. WDict $ member fun (Lam v t u b)
     -- `(|) :: Con`
     DUnionInCon : WDict . member con $ Tagged TUnion
+    -- `' :: Con`
+    DPromoteInCon : WDict . member con $ Tagged TPromote 
+    -- `for(x) { x :: Any }`
     DNextLvl : forall c. WDict2 c -> WDict c
 
   WDict2 : WCo -> Type
@@ -150,6 +148,15 @@ mutual
   con : WTy
   con = IsTy $ Tagged TCon
 
+  inter : WTy -> WTy -> WTy
+
+  -- type a ~> b = (f: Con) <<= { a <: arg(f) /\ res(f) <: b }
+  conWith : WTy -> WTy -> WTy
+
+  -- type Con2 = (f: Con) <<= { for(x: arg(f)) { f(x) :: Con } }
+  --           = [a: Ty, b: Ty, c: Ty] (f: a ~> b ~> c)
+  con2 : WTy
+
   conIsFun : WCon -> WFun
   conIsFun (Is f {d}) = Is f {d=DConSubFun {fInCon=d}}
   
@@ -159,10 +166,62 @@ mutual
   conjunct : WCo -> WCo -> WCo
 
   union : WTy -> WTy -> WTy
+
+  -- This not being total will be a pain to fix
+  -- To avoid having tons of functions that do `impossible` matches on every
+  -- axiom dictionary (e.g: `arg (Is _ {d=DTyInTy}) impossible`), we will need 
+  -- to restructure somehow.
+  0 arg : WFun -> WTy
+  arg (Is (Tagged TMember) {d=DMemberInFun}) = pairTy any ty
+  arg (Is (Tagged TUnion) {d=DConSubFun {f=Tagged TUnion}}) 
+    = pairTy ty ty
+  arg (Is (Tagged TPromote)) = any
+  arg (Is (Lam _ t _ _)) = t
+  -- This case doesn't work because we would need to match every possible
+  -- open type `i` to prove it is the same in the instance dict.
+  -- There are in theory infinite open types (perhaps when we get down to the
+  -- natural case we can use induction/views but that's still a TON of redundant
+  -- cases)
+  -- Naturally the solution (as always with dependent types) is to model the
+  -- data with the datatype - we need dedicated constructors for open types
+  -- vs closed ones
+  -- This is quite a big refactor, but I think it is sensible
+  -- IsOpen would imply that the
+  -- arg (Is is_i_I_swear_Idris_pls {d=DInst {o=IsTy {d=DFunInTy} (Tagged TFun)} (InstOf _)}) = ?tmp
+  arg _ = ?todo2
+
+
+  promote : WAny -> WTy
+  promote x = IsTy (App (Is $ Tagged TPromote) x) {d = ?huhhhh}
+
+
+  0 res : WFun -> WTy
+  res (Is (Lam _ _ u _)) = u
+  res _ = ?todo3
+  
+  App' : (f: WCon) -> (x: WExp) 
+        -> {auto argValid: WDict $ member (arg $ conIsFun f) x} 
+        -> WExp
+  
+  fun : WTy
+  fun = IsTy $ Tagged TFun
+
+  isFun : (e: WExp) -> {auto d: WDict $ member fun e} -> WFun
+  isCon : (e: WExp) -> {auto d: WDict $ member con e} -> WCon
+
+  -- Apply curried constructor (operator constructor)
+  BiApp : (f: WCon) -> (x: WExp) 
+        -> { auto xIsArg: WDict $ member (arg $ conIsFun f) x } 
+        -> { auto fIsArityTwo: WDict . member con $ App' f x }
+        -> (y: WExp) 
+        -> { auto yIsArg: WDict $ member (arg . conIsFun $ isCon (App' f x)) y }
+        -> WExp
+
+
   -- union (IsTy x) (IsTy y) = IsTy (App (Is $ Tagged TUnion) $ pair x y)
 
-  builtinCons : WExp -> WUTup -> WExp
-  builtinCons x y = ConsApp x y
+  cons : WExp -> WUTup -> WExp
+  cons x y = BiApp (Is (Tagged TCons) {d = ?consIsCon}) x {xIsArg = ?xIsArg} {fIsArityTwo = ?fIsArityTwo} (proj y) {yIsArg = ?yIsArg}
 
   utup : WTy
 
@@ -171,7 +230,7 @@ mutual
   unit = Is $ Tagged TUnit
 
   pair : WExp -> WExp -> WExp
-  pair x y = builtinCons x $ Is (builtinCons y unit) {d=DConsInUTup}
+  pair x y = cons x $ Is (cons y unit) {d = ?todo}
 
   -- A couple possible definitions - first is definitely neater though...
   -- > Pair(a, b) 
@@ -192,27 +251,12 @@ mutual
   projTy : WTy -> WExp
   projTy (IsTy x) = x
 
-  fun : WTy
-  fun = IsTy $ Tagged TFun
-
   any : WTy
   any = IsTy $ Tagged TAny
 
-  -- This not being total will be a pain to fix
-  -- To avoid having tons of functions that do `impossible` matches on every
-  -- axiom dictionary (e.g: `arg (Is _ {d=DTyInTy}) impossible`), we will need 
-  -- to restructure somehow.
-  0 arg : WFun -> WTy
-  arg (Is (Tagged TMember) {d=DMemberInFun}) = pairTy any ty
-  arg (Is (Tagged TUnion) {d=DConSubFun {f=Tagged TUnion}}) 
-    = pairTy ty ty
-  arg (Is (Lam _ t _ _)) = t
-  arg _ = ?todo2
-
-  0 res : WFun -> WTy
-  res (Is (Lam _ _ u _)) = u
-  res _ = ?todo3
-  
+  data WInstDict : WTy -> WTy -> Type where
+    InstOf : forall o, i. Tuple (map (\e => WTypedExp $ e i) $ tyMembers o) 
+           -> WInstDict o i
 
   -- Function application
   app : (f: WFun) -> (x: WTypedExp $ arg f) -> WTypedExp $ res f
@@ -222,9 +266,25 @@ mutual
   ($$) : (f: WFun) -> (x: WTypedExp $ arg f) -> WTypedExp $ res f
   ($$) = app
 
+  tyMembers : WTy -> List (WTy -> WTy)
+  tyMembers fun = [\_ => ty, \_ => ty] -- arg, res
 
--- 0 wut : forall x, y. WDict (member (pairTy (IsTy (Tagged TTy)) (IsTy (Tagged TTy))) (ConsApp x (Is (ConsApp y (Is (Tagged TUnit))) {d = DConsInUTup {x=y} {y=Is (Tagged TUnit)}})))
--- wut {x=IsTy _ {d}} = DPairInPairTy {xInA=d}
+
+
+  toTy : WTypedExp ty -> WTy
+  toTy (Is x) = IsTy x
+
+  argAlt : forall fTy. (f: WFun) -> WInstDict fun fTy -> WTy
+  argAlt _ (InstOf [x, _]) = toTy x
+  argAlt _ _ = ?todo4
+
+  -- Type members can either be defined as taking "self", an object in the type,
+  -- or the instance head type itself.
+  -- Note the latter only makes sense for open types, but only open types have
+  -- members!
+  data TyMember : Type where
+    SelfTo : WTy -> TyMember
+    TyTo : WTy -> TyMember
 
 
 -- `mutual` blocks in Idris2 have some limitations with regards to how recursive
@@ -243,10 +303,16 @@ mutual
   -- the same type, so instead we must create a second level-dictionary for
   -- these axioms
   data WDict2_ : WCo -> Type where
+    -- TODO: Work out if this axiom is even necessary - could we just rely on
+    -- `res`?
     -- `for(x: Ty, y: Ty) { x | y :: Ty }`
-    DUnionInTy : forall x, y
+    DUnionedInTy : forall x, y
               . {xInTy: WDict $ member ty x} -> {yInTy: WDict $ member ty y} 
-              -> WDict2_ . member ty $ App (Is $ Tagged TUnion) (pair x y) 
-              {argValid = DPairInPairTy {a=ty} {b=ty} {x=x} {y=y}}
+              -> WDict2_ . member ty $ App (Is $ Tagged TUnion) (
+                Is (pair x y) {d=DPairInPairTy {a=ty} {b=ty} {x} {y}}
+              )
+    -- for(x: Any) { 'x :: Ty } 
+    DPromotedInTy : forall x. WDict2_ . member ty $ App (Is $ Tagged TPromote) x
+
 
   WDict2 = WDict2_
