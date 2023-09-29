@@ -58,6 +58,8 @@ mutual
         -> (WDict (member t $ var v) -> WTypedExp u) -> WExp
     Var : Nat -> WExp
 
+  tagged : WTag -> WExp
+  tagged = Tagged
 
   -- `WTy` is defined independently of `WTypedExp` to make encoding type-in-type
   -- possible
@@ -135,6 +137,11 @@ mutual
     DPromoteInCon : WDict $ member con $ Tagged TPromote 
     -- `for(f: Con, x: arg(f)) { f(x) :: res(f) }`
     DAppliedInRes : forall f, x. WDict $ member (res $ conIsFun f) (App f x)
+    -- `(:.) :: Con`
+    DConsInCon : WDict $ member con $ Tagged TCons
+    -- `for(x) { (:.)(x) :: Con }
+    DConsedInCon : forall x. WDict $ member con 
+                 $ App (Is (Tagged TCons) {d = dConsInCon}) x
     DNextLvl : forall c. WDict2 c -> WDict c
 
   WDict2 : WCo -> Type
@@ -163,6 +170,9 @@ mutual
   
   member : WTy -> WExp -> WCo
   -- member t x = Is {t=co} (App (Is (Tagged TMember)) $ pair (projTy t) x)
+
+  dConsInCon : WDict $ member con $ tagged TCons
+  dConsInCon = DConsInCon
 
   conjunct : WCo -> WCo -> WCo
 
@@ -230,7 +240,7 @@ mutual
   -- union (IsTy x) (IsTy y) = IsTy (App (Is $ Tagged TUnion) $ pair x y)
 
   cons : WExp -> WUTup -> WExp
-  cons x y = BiApp (Is (Tagged TCons) {d = ?consIsCon}) x {xIsArg = ?xIsArg} {fIsArityTwo = ?fIsArityTwo} (proj y) {yIsArg = ?yIsArg}
+  cons x y = BiApp (Is (Tagged TCons) {d = ?consIsCon}) x {xIsArg = ?xIsArg} {fIsArityTwo = DConsedInCon} (proj y) {yIsArg = ?yIsArg}
 
   utup : WTy
 
@@ -268,6 +278,11 @@ mutual
            -> WInstDict o i
 
   -- Function application
+  -- We should be able to match on `f` to find if it is a constructor (in which
+  -- case we delegate to `App`) or a lambda (in which case we beta-reduce)
+  -- I am currently unsure how to represent such an axiom as "f being a function
+  -- means it is either a lambda or a constructor". We might need to model the
+  -- data better to achieve this.
   app : (f: WFun) -> (x: WTypedExp $ arg f) -> WTypedExp $ res f
 
   infix 0 $$
