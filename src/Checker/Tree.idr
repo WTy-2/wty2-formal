@@ -34,7 +34,7 @@ data WTag
   --          = unstable
   -- I like puns ¯\_(ツ)_/¯
   | TInstable | TOpen | TClosed -- `Instable: Ty`, `TOpen: Ty`, `TClosed: Ty`
-  | TPromote | TCoBy -- `('): Any -> Type`, `(<<=): (t: Ty) -> Co(t) -> Ty`
+  | TPromote | TCoBy -- `('): Any -> Type`, `(<<=): (t: Ty) -> (t -> Co) -> Ty`
   -- All identifiers from the source-program are enumerated and become tagged
   -- `T`s
   | T Nat
@@ -50,9 +50,9 @@ mutual
     -- TODO: Upgrade to `LamCase`
     -- We need a way of writing patterns (tree of constructors and variables)
     --
-    -- This definition obviously breaks with allow shadowing. To ensure
-    -- soundness, we would need to write an extrinsic proof that every variable
-    -- in checked programs is unique (hopefully not too difficult if we always
+    -- This definition obviously breaks with shadowing. To ensure soundness, we
+    -- would need to write an extrinsic proof that every bound variable in
+    -- checked programs is unique (hopefully not too difficult if we always
     -- generate fresh variables at every binder in the renaming pass)
     Lam : (v: Nat) -> (t: WTy) -> (u: WTy) 
         -> (WDict (member t $ var v) -> WTypedExp u) -> WExp
@@ -101,7 +101,7 @@ mutual
     DInst : forall o, i. {iIsTy: WDict $ member ty i} -> WInstDict o (IsTy i) 
                        -> WDict $ member o i
     -- Axioms:
-    -- for[a, b](x: a, y: b) { (x, y) :: PairTy(a, b)
+    -- for[a, b](x: a, y: b) { (x, y) :: PairTy(a, b) }
     DPairInPairTy : forall a, b, x, y
                   . {auto xInA: WDict $ member a x} 
                   -> {auto yInB: WDict $ member b y} 
@@ -169,7 +169,7 @@ mutual
   conIsFun (Is f {d}) = Is f {d=DConSubFun {fInCon=d}}
   
   member : WTy -> WExp -> WCo
-  -- member t x = Is {t=co} (App (Is (Tagged TMember)) $ pair (projTy t) x)
+  -- member t x = Is {t=co} (App (Is (Tagged TMember)) (Is $ pair (projTy t) x))
 
   dConsInCon : WDict $ member con $ tagged TCons
   dConsInCon = DConsInCon
@@ -191,13 +191,13 @@ mutual
   -- This case doesn't work because we would need to match every possible
   -- open type `i` to prove it is the same in the instance dict.
   -- There are in theory infinite open types (perhaps when we get down to the
-  -- natural case we can use induction/views but that's still a TON of redundant
+  -- natural case we can use induction/views but that's still a TON of redudndant
   -- cases)
   -- Naturally the solution (as always with dependent types) is to model the
   -- data with the datatype - we need dedicated constructors for open types
   -- vs closed ones
   -- This is quite a big refactor, but I think it is sensible
-  -- IsOpen would imply that the
+  --
   -- arg (Is is_i_I_swear_Idris_pls {d=DInst {o=IsTy {d=DFunInTy} (Tagged TFun)} (InstOf _)}) = ?tmp
   arg _ = ?todo2
 
@@ -228,7 +228,7 @@ mutual
   -- Apply curried constructor (operator constructor)
   BiApp : (f: WCon) -> (x: WExp) 
         -> { auto xIsArg: WDict $ member (arg $ conIsFun f) x } 
-        -> { auto fIsArityTwo: WDict $ member con $ AppCon f (IsTyped x) }
+        -> { auto fIsArityTwo: WDict $ member con $ AppCon f $ IsTyped x }
         -> (y: WExp) 
         -> { auto yIsArg: WDict $ member (
           arg $ conIsFun $ isCon $ AppCon f $ IsTyped x
@@ -240,7 +240,9 @@ mutual
   -- union (IsTy x) (IsTy y) = IsTy (App (Is $ Tagged TUnion) $ pair x y)
 
   cons : WExp -> WUTup -> WExp
-  cons x y = BiApp (Is (Tagged TCons) {d = ?consIsCon}) x {xIsArg = ?xIsArg} {fIsArityTwo = DConsedInCon} (proj y) {yIsArg = ?yIsArg}
+  cons x y 
+    = BiApp (Is (Tagged TCons) {d = ?consIsCon}) x {xIsArg = ?xIsArg} 
+    {fIsArityTwo = DConsedInCon} (proj y) {yIsArg = ?yIsArg}
 
   utup : WTy
 
@@ -291,7 +293,8 @@ mutual
   ($$) = app
 
   tyMembers : WTy -> List (WTy -> WTy)
-  tyMembers fun = [\_ => ty, \_ => ty] -- arg, res
+  tyMembers (IsTy (Tagged TFun)) = [\_ => ty, \_ => ty] -- arg, res
+  tyMembers _ = ?ahhhhh
 
 
 

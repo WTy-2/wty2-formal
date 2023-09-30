@@ -47,5 +47,5 @@ interface (MonadWriter m, MonadReader m) => MonadState (m: Type -> Type) where
 
 public export
 data Tuple : List Type -> Type where
-  (::) : forall t. (h: t) -> (r: Tuple ts) -> Tuple (t :: ts)
+  (::) : forall t, ts. (h: t) -> (r: Tuple ts) -> Tuple (t :: ts)
   Nil : Tuple []
