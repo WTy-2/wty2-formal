@@ -8,7 +8,7 @@ If it goes well, this could feasibly turn into a WTy2 typechecker/interpreter:
 ## Why Agda *and* Idris2?
 
 - I started this project in Idris2, having been drawn to it's simplicity.
-- Unfortunately, Idris2's compiler is not that robust. Error messages are especially poor (often making it difficult to tell if an error is caused by a compiler bug or is a "real" problem).
+- Unfortunately, Idris2's compiler is not very robust. Error messages are especially poor (often making it difficult to tell if an error is caused by a compiler bug or is a "real" problem).
 - Furthermore, after experimenting with Agda, I found it's instance arguments and automatic proof search features to be much more effective than Idris2's equivalents (auto implicit arguments and proof search).
 - Lean and Coq were quickly dismissed due to their lack of support for induction-recursion/induction-induction, which my encoding of WTy2's built-ins makes liberal use of (Lean4's type theory is also not very customisable - you cannot assume `Type : Type`, or disable strict positivity checking - of course these features break soundness, but they are very convenient!)
 - So, for these reasons, I currently have found Agda the most enjoyable and productive language to write dependently-typed code in. I still would like to backport my progress back to Idris2 (and believe this should not be *too* difficult) for actually running the code (of course, Agda does support program extraction, but it is clunky - also I find discovering the differences in what different theorem provers accept quite fun, lol).
