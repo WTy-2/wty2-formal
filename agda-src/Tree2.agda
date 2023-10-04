@@ -5,7 +5,14 @@ open import Function.Base
 open import Data.List.Base
 open import Relation.Binary.PropositionalEquality.Core
 
+-- Utils
+
 postulate todo : ∀ {a : Set} → a
+
+infer : ∀ {t : Set} → {{t}} → t
+infer {{d}} = d
+
+-- End Utils
 
 -- Things went quite wrong the previous attempt. It appears that it is a LOT
 -- easier to get Agda's typechecker to loop than Idris2 (every function I have 
@@ -27,6 +34,7 @@ data WTag : Set where
   TMember : WTag
   TUnion : WTag
   TConjunct : WTag
+  TImplies : WTag
   TInter : WTag
   TCo : WTag
   TAny : WTag
@@ -60,7 +68,8 @@ WTy : Set
 
 -- TODO: Relax to `WFun → WTy`
 arg : WCon → WExp
-res : WCon → WExp
+-- Dependent functions
+res : (f : WCon) → WTypedExp (arg f) → WExp
 
 data WApp : Set
 
@@ -97,16 +106,34 @@ data WTypedExp where
 unwrap : ∀ {t} → WTypedExp t → WExp
 unwrap (Is x) = x
 
-arg (Is (Tagged TMember)) = Tagged TOpen
-arg (Is (App (Is (Tagged TMember) $$ _))) = Tagged TAny
-arg (Is (Tagged TConjunct)) = Tagged TCo
-arg (Is (App (Is (Tagged TConjunct) $$ _))) = Tagged TCo
-arg _ = todo
+-- TODO: Relax to `(t : WTy) → (t → WCo) → WExp
+_<<=_ : (t : WExp) → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
+      → (WTypedExp t → WCo) → WExp
 
-res (Is (App (Is (Tagged TMember) $$ _))) = Tagged TCo
-res _ = todo
+res (Is (App (Is (Tagged TMember) $$ _))) _ = Tagged TCo
+res (Is (App (Is (Tagged TConjunct) $$ _))) _ = Tagged TCo
+res _ _ = todo
+
+_∧_ : WCo → WCo → WExp
+
+_⇒_ : WCo → WCo → WExp
+
+_=>_ : (c : WExp) → {{cInCo : WDict $ c ∈ Tagged TCo}} 
+     → ({{WDict c}} → WCo) → WExp
+
+
+dictIndIsCo : ∀ {c} → {{WDict c}} → WDict $ c ∈ Tagged TCo
 
 data WDict where
+  instance DConjunct : ∀ {co1 co2} → {{l : WDict co1}} → {{r : WDict co2}} 
+                     → WDict
+                     $ Is co1 {{d = dictIndIsCo}} ∧ Is co2 {{d = dictIndIsCo}}
+
+  DImplies : ∀ {co1 co2} → {{{{WDict co1}} → WDict co2}}
+           → {{co1InCo : WDict $ co1 ∈ Tagged TCo}} 
+           → {{co2InCo : WDict $ co2 ∈ Tagged TCo}}
+           → WDict $ Is co1 ⇒ Is co2
+
   instance DConjunctInCon : WDict $ Tagged TConjunct ∈ Tagged TCon
   instance DConjunctInCon2 : ∀ {x} → WDict $ App (Is (Tagged TConjunct) $$ x) 
                            ∈ Tagged TCon
@@ -116,32 +143,61 @@ data WDict where
                          ∈ Tagged TCon
 
   instance DOpenInOpen : WDict $ Tagged TOpen ∈ Tagged TOpen
+  instance DCoInOpen : WDict $ Tagged TCo ∈ Tagged TOpen
   
   -- TODO: Eventually remove this to avoid scoping errors
   instance DAllInAny : ∀ {x} → WDict $ x ∈ Tagged TAny
 
-  instance DAppliedInRes : ∀ {f x} → WDict $ (App $ f $$ x) ∈ res f
+  instance DAppliedInRes : ∀ {f x} → WDict $ (App $ f $$ x) ∈ res f x
 
-_∧_ : WCo → WCo → WExp
-x ∧ y = App $ (Is $ App $ Is (Tagged TConjunct) $$ x) $$ y
+arg (Is (Tagged TMember)) = Tagged TOpen
+arg (Is (App (Is (Tagged TMember) $$ _))) = Tagged TAny
+arg (Is (Tagged TConjunct)) = Tagged TCo
+arg (Is (App (Is (Tagged TConjunct) $$ _))) = Tagged TCo
+arg (Is (Tagged TImplies)) = Tagged TCo
+arg (Is (App (Is (Tagged TImplies) $$ c))) = Tagged TCo <<= (λ _ → c)
+-- TODO: Relax to Ty
+arg (Is (Tagged TSuchThat)) = Tagged TOpen
+-- TODO: Make SuchThat dependent (should take `c -> Tagged TCo`)
+-- but of course, `->` requires `<<=`...
+arg (Is (App (Is (Tagged TSuchThat) $$ c))) = Tagged TCo
+arg _ = todo
+
+
+
+biApp : (f : WCon) → (x : WTypedExp $ arg f)
+      → {{fXInCon : WDict $ App (f $$ x) ∈ Tagged TCon}} 
+      → (y : WTypedExp $ arg (Is $ App $ f $$ x)) → WExp
+biApp f x y = App $ (Is $ App $ f $$ x) $$ y
+
+x ∧ y = biApp (Is $ Tagged TConjunct) x y
+
+dictIndIsCo {{DConjunct}} = infer
+dictIndIsCo {{_}} = todo -- Need to match on every dict
 
 -- Dependent and
--- x /\\ y = x /\ (x => y)
+-- x /\= y = x /\ (x => y)
 --
 -- In `Ty` (so without `Co` sugar) this would look a bit like
--- (/\\) : (a : Ty) -> (b : a -> Ty) -> Ty
--- a /\\ b = Pair(a, (x : a) -> b(x))
+-- (/\=) : (a : Ty) -> (b : a -> Ty) -> Ty
+-- a /\= b = Pair(a, (x : a) -> b(x))
 -- Knowing ∀(x: a, y: a) {x ~ y}, it is obvious which `a` to provide to the
 -- `snd` element (the `fst` element).
 -- In other words, we have encoded dependent pairs inside `Co` manually
 -- via ordinary pairs + dependent functions
 _⇑_ : (x : WExp) → {{xInCo : WDict $ x ∈ Tagged TCo}} → ({{WDict x}} → WCo) 
     → WExp
+-- x ⇑ y = Is x ∧ Is (x => y)  
 
--- I am slightly that the definition of this will require ∈ and we will get
--- termination errors, but let's give it a try...
+-- TODO: Relax to `WTy → WExp → WCo`
+member : WOpen → WExp → WExp
+member t x = biApp (Is $ Tagged TMember) t (Is x)
+
+
+-- I am slightly worried that the definition of this will require ∈ and we will
+-- get termination errors, but let's give it a try...
 memberTo∈ : ∀ {x t} → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
-          → {{WDict (App $ (Is $ App $ Is (Tagged TMember) $$ Is t) $$ Is x)}} 
+          → {{WDict $ member (Is t) x}} 
           → WDict $ x ∈ t
 
 x ∈ y = yInOpen ⇑ xInY
@@ -154,7 +210,8 @@ x ∈ y = yInOpen ⇑ xInY
 
     xInY : {{WDict yInOpen}} → WCo
     xInY = xInYAlt {{memberTo∈ {x = y} {t = Tagged TOpen}}}
-    
+
+
 
 -- Options:
 -- Untyped `App`, and an interpret/reduce function that checks for type errors 

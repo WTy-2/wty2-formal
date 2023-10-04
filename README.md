@@ -1,5 +1,5 @@
 # wty2-formal
-An attempt to formalise WTy2's type system with Agda and Idris2 (current progress is mostly inside [Tree.agda](./agda-src/Tree.agda))
+An attempt to formalise WTy2's type system with Agda and Idris2 (I have restarted a couple times, but current progress is mostly in [Tree2.agda](./agda-src/Tree2.agda))
 
 If it goes well, this could feasibly turn into a WTy2 typechecker/interpreter:
 - Typechecking into an indexed AST is painful (as I experienced during WACC) but also is an extremely powerful way to prevent typechecker bugs (hopefully no need to build a giant test suite)
