@@ -76,16 +76,14 @@ data WApp : Set
 data WExp where
   Tagged : WTag → WExp
   Var : Nat → WExp
-  App : WApp → WExp
+  -- App (defined infix for convenience)
+  _$$_ : (f : WCon) → WTypedExp (arg f) → WExp
 
 WCon = WTypedExp $ Tagged TCon
 WCo = WTypedExp $ Tagged TCo
 WAny = WTypedExp $ Tagged TAny
 WClosed = WTypedExp $ Tagged TClosed
 WOpen = WTypedExp $ Tagged TOpen
-
-data WApp where
-  _$$_ : (f : WCon) → WTypedExp (arg f) → WApp
 
 -- TODO: Relax/strengthen to `WTy → WAny → WCo`
 
@@ -110,8 +108,8 @@ unwrap (Is x) = x
 _<<=_ : (t : WExp) → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
       → (WTypedExp t → WCo) → WExp
 
-res (Is (App (Is (Tagged TMember) $$ _))) _ = Tagged TCo
-res (Is (App (Is (Tagged TConjunct) $$ _))) _ = Tagged TCo
+res (Is (Is (Tagged TMember) $$ _)) _ = Tagged TCo
+res (Is (Is (Tagged TConjunct) $$ _)) _ = Tagged TCo
 res _ _ = todo
 
 _∧_ : WCo → WCo → WExp
@@ -135,11 +133,11 @@ data WDict where
            → WDict $ Is co1 ⇒ Is co2
 
   instance DConjunctInCon : WDict $ Tagged TConjunct ∈ Tagged TCon
-  instance DConjunctInCon2 : ∀ {x} → WDict $ App (Is (Tagged TConjunct) $$ x) 
+  instance DConjunctInCon2 : ∀ {x} → WDict $ (Is (Tagged TConjunct) $$ x) 
                            ∈ Tagged TCon
   
   instance DMemberInCon : WDict $ Tagged TMember ∈ Tagged TCon
-  instance DMemberInCon2 : ∀ {x} → WDict $ App (Is (Tagged TMember) $$ x) 
+  instance DMemberInCon2 : ∀ {x} → WDict $ (Is (Tagged TMember) $$ x)
                          ∈ Tagged TCon
 
   instance DOpenInOpen : WDict $ Tagged TOpen ∈ Tagged TOpen
@@ -148,27 +146,27 @@ data WDict where
   -- TODO: Eventually remove this to avoid scoping errors
   instance DAllInAny : ∀ {x} → WDict $ x ∈ Tagged TAny
 
-  instance DAppliedInRes : ∀ {f x} → WDict $ (App $ f $$ x) ∈ res f x
+  instance DAppliedInRes : ∀ {f x} → WDict $ (f $$ x) ∈ res f x
 
 arg (Is (Tagged TMember)) = Tagged TOpen
-arg (Is (App (Is (Tagged TMember) $$ _))) = Tagged TAny
+arg (Is (Is (Tagged TMember) $$ _)) = Tagged TAny
 arg (Is (Tagged TConjunct)) = Tagged TCo
-arg (Is (App (Is (Tagged TConjunct) $$ _))) = Tagged TCo
+arg (Is (Is (Tagged TConjunct) $$ _)) = Tagged TCo
 arg (Is (Tagged TImplies)) = Tagged TCo
-arg (Is (App (Is (Tagged TImplies) $$ c))) = Tagged TCo <<= (λ _ → c)
+arg (Is (Is (Tagged TImplies) $$ c)) = Tagged TCo <<= (λ _ → c)
 -- TODO: Relax to Ty
 arg (Is (Tagged TSuchThat)) = Tagged TOpen
 -- TODO: Make SuchThat dependent (should take `c -> Tagged TCo`)
 -- but of course, `->` requires `<<=`...
-arg (Is (App (Is (Tagged TSuchThat) $$ c))) = Tagged TCo
+arg (Is (Is (Tagged TSuchThat) $$ c)) = Tagged TCo
 arg _ = todo
 
 
 
 biApp : (f : WCon) → (x : WTypedExp $ arg f)
-      → {{fXInCon : WDict $ App (f $$ x) ∈ Tagged TCon}} 
-      → (y : WTypedExp $ arg (Is $ App $ f $$ x)) → WExp
-biApp f x y = App $ (Is $ App $ f $$ x) $$ y
+      → {{fXInCon : WDict $ (f $$ x) ∈ Tagged TCon}} 
+      → (y : WTypedExp $ arg (Is $ f $$ x)) → WExp
+biApp f x y = (Is $ f $$ x) $$ y
 
 x ∧ y = biApp (Is $ Tagged TConjunct) x y
 
@@ -203,10 +201,10 @@ memberTo∈ : ∀ {x t} → {{tInOpen : WDict $ t ∈ Tagged TOpen}}
 x ∈ y = yInOpen ⇑ xInY
   where
     yInOpen : WExp
-    yInOpen = App $ (Is $ App $ Is (Tagged TMember) $$ Is (Tagged TOpen)) $$ Is y
+    yInOpen = Is (Is (Tagged TMember) $$ Is (Tagged TOpen)) $$ Is y
 
     xInYAlt : {{WDict $ y ∈ Tagged TOpen}} → WCo
-    xInYAlt = Is $ App $ (Is $ App $ Is (Tagged TMember) $$ Is y) $$ Is x
+    xInYAlt = Is $ (Is $ Is (Tagged TMember) $$ Is y) $$ Is x
 
     xInY : {{WDict yInOpen}} → WCo
     xInY = xInYAlt {{memberTo∈ {x = y} {t = Tagged TOpen}}}
