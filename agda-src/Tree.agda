@@ -1,13 +1,10 @@
 {-# OPTIONS --no-positivity-check #-}
+-- {-# OPTIONS --lossy-unification #-}
 
-import Agda.Builtin.Nat
-open Agda.Builtin.Nat
-import Function.Base
-open Function.Base
-import Data.List.Base
-open Data.List.Base
-import Agda.Builtin.Equality
-open Agda.Builtin.Equality
+open import Agda.Builtin.Nat
+open import Function.Base
+open import Data.List.Base
+open import Agda.Builtin.Equality
 
 -- Utils
 
@@ -41,7 +38,6 @@ data WTag : Set where
   TConjunct : WTag
   TUnion : WTag
   TInter : WTag
-  TUnitTy : WTag
   TCo : WTag
   TAny : WTag
   TFor : WTag
@@ -57,7 +53,7 @@ data WTag : Set where
   T : Nat → WTag
 
 data WExp : Set
-WTy : Set
+data WTy : Set
 data WTypedExp : WTy -> Set
 data WOpen : Set
 
@@ -71,12 +67,15 @@ WClosed : Set
 data WDict : WCo -> Set
 
 ty : WOpen
+tyInTy : WTy
 co : WOpen
 fun : WOpen
 con : WOpen
 anyTy : WOpen
 openTy : WOpen
 closed : WOpen
+openInTy : WTy
+closedInTy : WTy
 utup : WClosed
 
 arg : WFun -> WTy
@@ -108,13 +107,13 @@ data WExp where
       → ({{WDict (member t $ Var v)}} → WTypedExp u) → WExp 
 
 data WOpen where
-  IsOpen : (e : WExp) → {{d : WDict $ member (openToTy openTy) e}} → WOpen
+  IsOpen : (e : WExp) → {{d : WDict $ member openInTy e}} → WOpen
 
 unwrapOpen : WOpen -> WExp
 unwrapOpen (IsOpen e) = e
 
 data WTypedExp where
-  Is : ∀ {t} →  (e : WExp) → {{d : WDict $ member t e}} → WTypedExp t
+  Is : ∀ {t} → (e : WExp) → {{d : WDict $ member t e}} → WTypedExp t
 
 unwrap : ∀ {t} -> WTypedExp t -> WExp
 unwrap (Is e) = e
@@ -125,7 +124,6 @@ WCo   = WTypedExp $ openToTy co
 WUTup = WTypedExp $ closedToTy utup
 WAny  = WTypedExp $ openToTy anyTy
 WClosed = WTypedExp $ openToTy closed
-WTy = WTypedExp $ openToTy ty
 
 data WInst : WOpen -> WExp -> Set
 
@@ -133,12 +131,13 @@ data WClosedMem : WClosed -> WExp -> Set where
 
 -- Replacing the final `WDict` with `wdict` as defined below (so carrying
 -- evidence of the index being correct vs the index being inherently the
--- correct one) appears to sometimes help with pattern-matching errors
+-- correct one) appears to sometimes help with pattern-matching unification
+-- (so-called "green slime") errors
 --
--- The consequence is that making the constructors instances no longer works
--- (because they immediately match any desired constraint).
--- We could avoid this by rewriting ALL instances below (as we already do with
--- DInst instances, but I would like to try and avoid this for now).
+-- The consequence is that working with them becomes a bit more clunky and that
+-- having the constructors be `instance`s no longer works (because they 
+-- immediately match any desired `WDict` constraint). I would like to try and
+-- avoid this for now...
 wdict : WCo → Set
 wdict c = ∀ {idx} → {idx ≡ c} → WDict idx
 
@@ -153,21 +152,28 @@ data WDict where
   DInst : ∀ {e t} → {{i : WInst t e}} → WDict $ member (openToTy t) e
   -- Closed type membership axioms
   DClosedMem : ∀ {e t} → {{WClosedMem t e}} 
-                      → WDict $ member (closedToTy t) e
+             → WDict $ member (closedToTy t) e
   
   
-  -- TODO: This should really be inside `WInst`, but I get termination checking
-  -- fails if I move it...
-  instance DOpenInOpen : WDict $ member (openToTy openTy) $ Tagged TOpen
+  -- TODO: This should really be inside `WInst`, but here prevents 
+  --  non-termination error
+  instance DOpenInOpen : WDict $ member openInTy $ Tagged TOpen
+
+  -- TODO:
+  -- This *should* be redundant, added to try and avoid non-termination
+  -- errors
+
+  instance DOpenSubTy : ∀ {x} → {{WDict $ member openInTy x}} 
+                      → WDict $ member tyInTy x
 
   -- Unions/intersection rules
   instance DLhsInUnion : ∀ {l r x} → {{xInL : WDict $ member l x}} 
-                         → WDict $ member (union l r) x
+                       → WDict $ member (union l r) x
   instance DRhsInUnion : ∀ {l r x} → {{xInR : WDict $ member r x}}
-                         → WDict $ member (union l r) x
+                       → WDict $ member (union l r) x
   instance DInBothInIntersect : ∀ {l r x} → {{xInL : WDict $ member l x}}
-                                → {{xInR : WDict $ member r x}}
-                                → WDict $ member (intersect l r) x
+                              → {{xInR : WDict $ member r x}}
+                              → WDict $ member (intersect l r) x
   
   -- Function application
   instance DAppliedInRes : ∀ {f x} → WDict $ member (res $ conToFun f) (App f x)
@@ -220,11 +226,11 @@ instance DClosedInOpen = DInst {{i = IClosedInOpen}}
 instance DCoInOpen     = DInst {{i = ICoInOpen}}
 instance DFunInOpen    = DInst {{i = IFunInOpen}}
 instance DAnyInOpen    = DInst {{i = IAnyInOpen}}
-instance DConSubFun : ∀ {f} → {{fInCon : WDict $ member (openToTy con) f}} 
-                    → WDict $ member (openToTy fun) f
+instance DConSubFun    : ∀ {f} → {{fInCon : WDict $ member (openToTy con) f}} 
+                       → WDict $ member (openToTy fun) f
 DConSubFun             = DInst {{i = IConSubFun}}
-instance DAllInAny : ∀ {e} → WDict $ member (openToTy anyTy) e
-DAllInAny = DInst {{i = IAllInAny}}
+instance DAllInAny     : ∀ {e} → WDict $ member (openToTy anyTy) e
+DAllInAny              = DInst {{i = IAllInAny}}
 
 instance DMemberInCon  = DInst {{i = IMemberInCon}}
 instance DMemberXInCon : ∀ {x} → WDict $ member (openToTy con) 
@@ -232,12 +238,15 @@ instance DMemberXInCon : ∀ {x} → WDict $ member (openToTy con)
 DMemberXInCon          = DInst {{i = IMemberXInCon}}
 
 instance DConsInCon    = DInst {{i = IConsInCon}}
-instance DConsXInCon : ∀ {x} → WDict $ member (openToTy con) 
-                     $ App (Is $ Tagged TCons) x
+instance DConsXInCon   : ∀ {x} → WDict $ member (openToTy con) 
+                       $ App (Is $ Tagged TCons) x
 DConsXInCon            = DInst {{i = IConsXInCon}}
 
 
 memberOpen t e = member (openToTy t) e
+memberClosed t e = member (closedToTy t) e
+
+openInTy = openToTy openTy
 
 co     = IsOpen (Tagged TCo)
 fun    = IsOpen (Tagged TFun)
@@ -245,21 +254,17 @@ anyTy  = IsOpen (Tagged TAny)
 openTy = IsOpen (Tagged TOpen) {{d = DOpenInOpen}}
 closed = IsOpen (Tagged TClosed) 
 
-conToFun (Is e {{d}}) = Is e {{d = DInst {{i = IConSubFun {{fInCon = d}}}}}}
+conToFun (Is e) = Is e
 
 -- (λ _ → openToTy ty) ∷ (λ _ → openToTy ty) ∷ []
 tyMembers' : ∀ {t e} → WInst t e → List ((self : WClosed) → WTy)
 
+tyMembers'' : ∀ {t e} → WDict (member (openToTy t) e) → List ((self : WClosed) → WTy)
 
 -- This, arguably, could even work as a member of the `ty` type
 -- This would VERY recursive (and hard to implement) though
 tyMembers : WOpen → List ((self : WClosed) → WTy)
 tyMembers (IsOpen _ {{d}}) = tyMembers'' d
-  where
-    tyMembers'' : ∀ {t e} → WDict (member (openToTy t) e) → List ((self : WClosed) → WTy)
-    -- tyMembers'' (DInst  {{i}} {refl}) = tyMembers' i
-    tyMembers'' _ = todo
--- tyMembers _ = todo
 
 -- a <: b = for(x: a) { a :: b }
 sub : WTy → WTy → WCo
@@ -273,7 +278,20 @@ gen : WOpen
 -- Con = Inj & Gen
 con = intersectOpen inj gen
 
-ty = unionOpen openTy (openToTy closed)
+-- WTy = WTypedExp tyInTy
+data WTy where
+  IsTy : (e : WExp) → {{d : WDict $ member tyInTy e}} → WTy
+
+tyInTy = openToTy ty
+
+openToTy (IsOpen e) = IsTy e
+  -- {{d = subst (λ x → WDict $ member x e) openToTyTyIsUnion DLhsInUnion}}
+
+ty = unionOpen openTy $ openToTy closed
+
+
+closedInTy = openToTy closed
+
 
 nil : WExp
 
@@ -293,22 +311,41 @@ BiApp : (f : WCon) → (x : WTypedExp $ arg $ conToFun f)
       → WExp
 BiApp f x y = App (Is $ App f x) y
 
+arg (Is (Tagged TMember)) = openToTy ty
+arg (Is (App (Is (Tagged TMember)) x)) = openToTy anyTy
+arg _ = todo
+
+res (Is (App (Is (Tagged TMember)) x)) = openToTy co
+res _ = todo
+
+
 -- We should be able to remove these postulates after we define arg
 -- (worst-case turn them into forward declarations and prove after defining it)
-postulate argMemberIsTy : openToTy ty ≡ arg (Is $ Tagged TMember)
+argMemberIsTy : openToTy ty ≡ arg (Is $ Tagged TMember)
+argMemberIsTy = refl
 
-postulate arg2MemberXIsAny : ∀ {x} → openToTy anyTy 
-                          ≡ arg (Is $ App (Is $ Tagged TMember) x)
+arg2MemberXIsAny : ∀ {x} → openToTy anyTy 
+                 ≡ arg (Is $ App (Is $ Tagged TMember) x)
+arg2MemberXIsAny = refl
 
-postulate resMemberIsCo : ∀ {x} → openToTy co 
-                        ≡ res (Is $ App (Is $ Tagged TMember) x)
+resMemberIsCo : ∀ {x} → res (Is $ App (Is $ Tagged TMember) x)
+              ≡ openToTy co
+resMemberIsCo = refl
+
+
+typedTyToTy : WTypedExp tyInTy → WTy
+typedTyToTy (Is e) = IsTy e
+
+tyToTypedTy : WTy → WTypedExp tyInTy
+tyToTypedTy (IsTy e) = Is e
 
 -- openToTy anyTy != arg (conToFun $ Is (App (Is (Tagged TMember)) t))
 
-{-# TERMINATING #-}
-member t e rewrite argMemberIsTy rewrite resMemberIsCo {x = t}
-  = Is $ BiApp (Is $ Tagged TMember) t e'
+-- {-# TERMINATING #-}
+member t e
+  = subst WTypedExp (resMemberIsCo {x = t'}) $ Is $ BiApp (Is $ Tagged TMember) t' e'
     where
+      t' = subst WTypedExp argMemberIsTy $ tyToTypedTy t 
       e' = subst WTypedExp arg2MemberXIsAny $ Is e
 
 postulate argConsIsAny : openToTy anyTy ≡ arg (Is $ Tagged TCons)
@@ -325,3 +362,15 @@ cons x y
     where
       x' = subst WTypedExp argConsIsAny $ Is x
       y' = subst WTypedExp arg2ConsUTup y
+
+
+foo : WExp → WCo
+foo = member tyInTy
+
+{-# INJECTIVE foo #-}
+
+memberInj : ∀ {x y} → foo x ≡ foo y → x ≡ y
+memberInj refl = refl
+
+-- tyMembers'' (DInst  {{i}}) = tyMembers' i
+-- tyMembers'' _ = todo
