@@ -98,17 +98,52 @@ unwrap : ∀ {t} → WTypedExp t → WExp
 unwrap (Is x) = x
 
 arg (Is (Tagged TMember)) = Tagged TOpen
+arg (Is (App (Is (Tagged TMember) $$ _))) = Tagged TAny
 arg (Is (Tagged TConjunct)) = Tagged TCo
 arg (Is (App (Is (Tagged TConjunct) $$ _))) = Tagged TCo
 arg _ = todo
+
+res (Is (App (Is (Tagged TMember) $$ _))) = Tagged TCo
+res _ = todo
 
 data WDict where
   instance DConjunctInCon : WDict $ Tagged TConjunct ∈ Tagged TCon
   instance DConjunctInCon2 : ∀ {x} → WDict $ App (Is (Tagged TConjunct) $$ x) 
                            ∈ Tagged TCon
+  
+  instance DMemberInCon : WDict $ Tagged TMember ∈ Tagged TCon
+  instance DMemberInCon2 : ∀ {x} → WDict $ App (Is (Tagged TMember) $$ x) 
+                         ∈ Tagged TCon
+
+  instance DOpenInOpen : WDict $ Tagged TOpen ∈ Tagged TOpen
+  
+  -- TODO: Eventually remove this to avoid scoping errors
+  instance DAllInAny : ∀ {x} → WDict $ x ∈ Tagged TAny
+
+  instance DAppliedInRes : ∀ {f x} → WDict $ (App $ f $$ x) ∈ res f
 
 _∧_ : WCo → WCo → WExp
 x ∧ y = App $ (Is $ App $ Is (Tagged TConjunct) $$ x) $$ y
+
+-- Dependent and
+-- x /\\ y = x /\ (x => y)
+--
+-- In `Ty` (so without `Co` sugar) this would look a bit like
+-- (/\\) : (a : Ty) -> (b : a -> Ty) -> Ty
+-- a /\\ b = Pair(a, (x : a) -> b(x))
+-- Knowing ∀(x: a, y: a) {x ~ y}, it is obvious which `a` to provide to the
+-- `snd` element (the `fst` element).
+-- In other words, we have encoded dependent pairs inside `Co` manually
+-- via ordinary pairs + dependent functions
+_⇑_ : (x : WExp) → (WDict x → WCo) → WCo
+
+x ∈ y = Is yInOpen ∧ xInY
+  where
+    yInOpen : WExp
+    yInOpen = App $ (Is $ App $ Is (Tagged TMember) $$ Is (Tagged TOpen)) $$ Is y
+
+    xInY : WCo 
+    
 
 -- Options:
 -- Untyped `App`, and an interpret/reduce function that checks for type errors
