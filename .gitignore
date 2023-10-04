@@ -1,9 +1,9 @@
 # Idris2
 build
 
-# Experiments with Idris2 as I learn the language which I keep in the same
-# directory as this project for convenience
-src/Experiments
+# Experiments with Agda/Idris2 as I learn the languages (unrelated to
+# formalisation of WTy2, but still kept in the repo locally for convenience)
+Experiments
 
 
 # Agda
