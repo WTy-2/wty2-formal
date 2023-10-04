@@ -135,15 +135,26 @@ x ∧ y = App $ (Is $ App $ Is (Tagged TConjunct) $$ x) $$ y
 -- `snd` element (the `fst` element).
 -- In other words, we have encoded dependent pairs inside `Co` manually
 -- via ordinary pairs + dependent functions
-_⇑_ : (x : WExp) → (WDict x → WCo) → WCo
+_⇑_ : (x : WExp) → {{xInCo : WDict $ x ∈ Tagged TCo}} → ({{WDict x}} → WCo) 
+    → WExp
 
-x ∈ y = Is yInOpen ∧ xInY
+-- I am slightly that the definition of this will require ∈ and we will get
+-- termination errors, but let's give it a try...
+memberTo∈ : ∀ {x t} → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
+          → {{WDict (App $ (Is $ App $ Is (Tagged TMember) $$ Is t) $$ Is x)}} 
+          → WDict $ x ∈ t
+
+x ∈ y = yInOpen ⇑ xInY
   where
     yInOpen : WExp
     yInOpen = App $ (Is $ App $ Is (Tagged TMember) $$ Is (Tagged TOpen)) $$ Is y
 
-    xInY : WCo 
+    xInYAlt : {{WDict $ y ∈ Tagged TOpen}} → WCo
+    xInYAlt = Is $ App $ (Is $ App $ Is (Tagged TMember) $$ Is y) $$ Is x
+
+    xInY : {{WDict yInOpen}} → WCo
+    xInY = xInYAlt {{memberTo∈ {x = y} {t = Tagged TOpen}}}
     
 
 -- Options:
--- Untyped `App`, and an interpret/reduce function that checks for type errors
+-- Untyped `App`, and an interpret/reduce function that checks for type errors 
