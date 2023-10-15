@@ -108,7 +108,6 @@ data WExp where
   Lam : (v : Maybe Nat) → (t : WExp) → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
       → applyIfJust (λ v r → {{WDict $ Var v ∈ t}} → r) v WExp
       → WExp
-
   -- Function types are primitive in WTy2 to solve a challenging case of 
   -- recursion (`(->)` is itself a function)
   -- Note even defining function types in terms of pi-types, which perhaps seems
@@ -122,6 +121,16 @@ data WExp where
   -- of pi-types, to define pi-types, we need to first have ordinary functions
   PrimPi : (t : WOpen) → WTypedExp (PrimFun t openTy) → WExp
 
+pattern lamConst t e = Lam nothing t e
+-- Unfortunately, instance arguments do not appear to be handled well/properly
+-- with pattern synonyms (specifically, I find that `e` is forced to be of type
+-- `WExp` instead of `{{WDict $ Var v ∈ t}} → WExp` when using the synonym)
+-- pattern lamBind v t e = Lam (just v) t e
+
+lamBind : (v : Nat) → (t : WExp) → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
+           → ({{WDict $ Var v ∈ t}} → WExp) → WExp
+lamBind v t e = Lam (just v) t e
+
 -- Con = Inj & Gen
 con : WExp
 -- WCon = WTypedExp $ Tagged TCon
@@ -131,14 +140,13 @@ WAny = WTypedExp $ Tagged TAny
 WClosed = WTypedExp $ Tagged TClosed
 WOpen = WTypedExp $ Tagged TOpen
 
+primApp : ∀ {a b} → {{aInOpen : WDict $ a ∈ Tagged TOpen}} 
+        → (f : WTypedExp $ PrimFun (Is a) b) → WTypedExp a → WExp
+
 -- TODO: Relax/strengthen to `WTy → WAny → WCo`
 
 unwrap : ∀ {t} → WTypedExp t → WExp
 unwrap (Is x) = x
-
--- TODO: Relax to `(t : WTy) → (t → WCo) → WExp
-_<<=_ : (t : WExp) → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
-      → (WTypedExp t → WCo) → WExp
 
 depRes (Is (Is (Tagged TMember) $$ _)) _ = Tagged TCo
 depRes (Is (Is (Tagged TConjunct) $$ _)) _ = Tagged TCo
@@ -197,7 +205,15 @@ data WDict where
   instance LamInPrimFun : ∀ {t b u} → {{bInU : WDict $ b ∈ u}} 
                         → {{tInOpen : WDict $ t ∈ Tagged TOpen}}
                         → {{uInOpen : WDict $ u ∈ Tagged TOpen}}
-                        → WDict $ Lam nothing t b ∈ PrimFun (Is t) (Is u) 
+                        → WDict $ lamConst t b ∈ PrimFun (Is t) (Is u)
+  -- Ugh, we seemingly have to provide the body a dictionary here to write this
+  -- typing rule.
+  instance lamBindInPrimFun : ∀ {v t u} {b : {{WDict $ Var v ∈ t}} → WExp} 
+                            → {{bInU : WDict $ b {{todo}} ∈ u}} 
+                            → {{tInOpen : WDict $ t ∈ Tagged TOpen}} 
+                            → WDict $ lamBind v t b ∈ u
+
+for : (t : WOpen) → WTypedExp (PrimFun t (Is $ Tagged TCo)) → WExp
 
 nonDep : WCon → Set
 nonDep f = depRes f ≡ λ _ → Tagged TOpen
@@ -206,7 +222,8 @@ instance promoteNonDep : nonDep $ Is $ Tagged TPromote
 promoteNonDep = refl
 
 -- TODO: Relax to (t : WTy) → WTypedExp (t → Tagged TCo) → WExp 
-suchThat : (t : WOpen) → WTypedExp (PrimFun t (Is $ Tagged TCo)) → WExp
+_<<=_ : (t : WOpen) → WTypedExp (PrimFun t (Is $ Tagged TCo)) → WExp
+_~_ : WExp → WExp → WExp
 
 arg (Is (Tagged TMember)) = Tagged TOpen
 arg (Is (Is (Tagged TMember) $$ _)) = Tagged TAny
@@ -214,7 +231,7 @@ arg (Is (Tagged TConjunct)) = Tagged TCo
 arg (Is (Is (Tagged TConjunct) $$ _)) = Tagged TCo
 arg (Is (Tagged TImplies)) = Tagged TCo
 arg (Is (Is (Tagged TImplies) $$ (Is c))) 
-  = suchThat (Is $ Tagged TCo) (Is $ Lam nothing (Tagged TCo) c)
+  = Is (Tagged TCo) <<= Is (lamConst (Tagged TCo) c)
 -- TODO: Relax to Ty
 arg (Is (Tagged TSuchThat)) = Tagged TOpen
 -- TODO: Make SuchThat dependent (should take `c -> Tagged TCo`)
@@ -227,8 +244,14 @@ arg _ = todo
 -- Injective functions
 -- We call this definition "prim" in that it is not co/contra-variant as it
 -- directly uses `PrimFun`
-primInjArrow : WOpen → WOpen → WOpen
-primInjArrow a b = Is $ PrimFun a b
+-- Inj a b = (f: a -> b) <<= { for(x: a, y: a) { f(x) ~ f(y) => x ~ y } }
+primInjArrow : WOpen → WOpen → WExp
+primInjArrow a@(Is a') b 
+  = Is (PrimFun a b) 
+  <<= (Is $ lamBind 0 (PrimFun a b) 
+  $ for a $ Is $ lamBind 1 a' $ for b $ Is $ lamBind 2 a'
+  $ primApp (Is $ Var 0) (Is $ Var 1) ~ primApp (Is $ Var 0) (Is $ Var 2))
+
 
 
 biApp : (f : WCon) → (x : WTypedExp $ arg f)
@@ -236,8 +259,7 @@ biApp : (f : WCon) → (x : WTypedExp $ arg f)
       → (y : WTypedExp $ arg (Is $ f $$ x)) → WExp
 biApp f x y = (Is $ f $$ x) $$ y
 
-
-suchThat t c = biApp (Is $ Tagged TSuchThat) t c
+t <<= c = biApp (Is $ Tagged TSuchThat) t c
 
 x ∧ y = biApp (Is $ Tagged TConjunct) x y
 
@@ -266,7 +288,6 @@ member t x = biApp (Is $ Tagged TMember) t (Is x)
 promote : WExp → WExp
 promote x = Is (Tagged TPromote) $$ Is x
 
-_~_ : WExp → WExp → WExp
 x ~ y = member (Is $ promote y) x
 
 -- TODO: Relax to `WTy → WTy → WOpen`
@@ -298,10 +319,3 @@ x ∈ y = yInOpen ⇑ xInY
 
     xInY : {{WDict yInOpen}} → WCo
     xInY = xInYAlt {{memberTo∈ {x = y} {t = Tagged TOpen}}}
-
-{- 
-Problem:
-Defunctionalisation is hard: To define dependent functions, we need to have
-non-dependent functions. But to define non-dependent function, we need much
-better machinery to get return type without having an argument.
--} 
