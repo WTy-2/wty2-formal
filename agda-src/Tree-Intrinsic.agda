@@ -23,28 +23,22 @@ postulate todo : ∀ {𝓁} {t : Set 𝓁} → t
 data @0 VarRep : Set where
   Fresh CallByVal CallByNeed : VarRep
 
-record WTy (@0 v : VarRep) : Set
+WTy : (@0 v : VarRep) → Set
 
 TyFwd : ∀ {@0 v} → WTy v
 
-data WExpBase : (@0 v : VarRep) → WTy v → Set
+data WExp : (@0 v : VarRep) → WTy v → Set
 
-record WTy v where
-  constructor Is
-  field
-    inner : WExpBase v TyFwd
+WTy v = WExp v TyFwd
 
-WExp : (@0 v : VarRep) → WExpBase v TyFwd → Set
-WExp v = (WExpBase v) ∘ Is
+data WExp₁ : (@0 v : VarRep) → WExp v TyFwd → Set
 
-data WExp₁ : (@0 v : VarRep) → WExpBase v TyFwd → Set
+data WExp where
+  Ty : ∀ {@0 v}            → WExp v TyFwd
+  Co : ∀ {v}               → WExp v Ty
+  _₁ : ∀ {v t} → WExp₁ v t → WExp v t
 
-data WExpBase where
-  Ty    : ∀ {@0 v}            → WExpBase v TyFwd
-  Co    : ∀ {v}               → WExp v Ty
-  _₁    : ∀ {v t} → WExp₁ v t → WExp v t
-
-TyFwd = Is Ty
+TyFwd = Ty
 
 vrep : (v : VarRep) → WExp v Ty → Set
 vrep Fresh      = const ℕ
@@ -83,12 +77,12 @@ _~_ : ∀ {v a} → WExp v a → WExp v a → WExp v Co
 x ~ y = x ∷ (′ y ₁) ₁
 
 ~refl : ∀ {v a} → (x : WExp v a) → WDict v $ x ~ x
-~refl x = ∷′-intro x
+~refl = ∷′-intro
 
 -- BAD! Matching on `∷′-intro _` causes a typechecker loop. I need to try and
 -- understand why...
 ~symm : ∀ {v a} → (x y : WExp v a)  → ⦃ WDict v $ x ~ y ⦄ → WDict v $ y ~ x
--- ~symm x y ⦃ ∷′-intro _ ⦄ = todo 
+-- ~symm x x ⦃ ∷′-intro _ ⦄ = todo 
 
 PolyWExp : (∀ {@0 v} → WExp v Ty) → Set
 PolyWExp t = ∀ {@0 v} → WExp v t

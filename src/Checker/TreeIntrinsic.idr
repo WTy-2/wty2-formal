@@ -24,26 +24,22 @@ module Checker.TreeIntrinsic
 -- The full example, also works!
 data VarRep = Fresh | CallByVal | CallByNeed
 
-data WTy : (0 v : VarRep) -> Type
+WTy : (0 v : VarRep) -> Type
 
 TyFwd : forall v. WTy v
 
-data WExpBase : (0 v : VarRep) -> WTy v -> Type
+data WExp : (0 v : VarRep) -> WTy v -> Type
 
-data WTy where
-  Is : forall v. WExpBase v TyFwd -> WTy v
+WTy v = WExp v TyFwd
 
-WExp : (0 v : VarRep) -> WExpBase v TyFwd -> Type
-WExp v x = WExpBase v $ Is x
+data WExpOther : (0 v : VarRep) -> WExp v TyFwd -> Type
 
-data WExpOther : (0 v : VarRep) -> WExpBase v TyFwd -> Type
-
-data WExpBase where
-  Ty    : forall v. WExpBase v TyFwd
-  Co    : forall v. WExpBase v TyFwd
+data WExp where
+  Ty    : forall v. WExp v TyFwd
+  Co    : forall v. WExp v TyFwd
   Other : forall v, t. WExpOther v t -> WExp v t
 
-TyFwd = Is Ty
+TyFwd = Ty
 
 vrep : (v : VarRep) -> WExp v Ty -> Type
 vrep Fresh      = const Nat
