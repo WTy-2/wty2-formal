@@ -1,5 +1,7 @@
 module Checker.TreeIntrinsic
 
+%default total
+
 -- Translation of https://github.com/agda/agda/issues/6966 - it works!
 -- record WTy
 
@@ -84,12 +86,39 @@ data WDict where
   InProIntro : forall v, a. (x : WExp v a) 
             -> WDict v $ Other $ In x (Other $ Pro x)
 
-Eq : forall v, a. WExp v a -> WExp v a -> WExp v Co
+Eq : forall v, a, b. WExp v a -> WExp v b -> WExp v Co
 Eq x y = Other $ In x (Other $ Pro y)
 
+-- Properties of `Eq`
 EqRefl : forall v, a. (x : WExp v a) -> WDict v $ Eq x x
 EqRefl = InProIntro
 
-EqSymm : forall v, a. (x : WExp v a) -> (y : WExp v a) 
+EqSymmSimp : forall v, a. (x : WExp v a) -> (y : WExp v a) 
       -> {auto x_eq_y : WDict v $ Eq x y} -> WDict v $ Eq y x
-EqSymm x x { x_eq_y = InProIntro _ } = InProIntro x
+EqSymmSimp x x { x_eq_y = InProIntro _ } = InProIntro x
+
+EqSymm : forall v, a, b. (x : WExp v a) -> (y : WExp v b) 
+      -> {auto x_eq_y : WDict v $ Eq x y} -> WDict v $ Eq y x
+EqSymm x x { x_eq_y = InProIntro x } = InProIntro x
+-- TODO: Is this case sound, it seems like a case of non-terminating recursion?
+EqSymm x y { x_eq_y = InIntro    x } = EqSymm x y
+
+EqTransSimp : forall v, a. (x : WExp v a) -> (y : WExp v a) -> (z : WExp v a)
+           -> {auto x_eq_y : WDict v $ Eq x y} 
+           -> {auto y_eq_z : WDict v $ Eq y z}
+           -> WDict v $ Eq x z
+EqTransSimp x x x { x_eq_y = InProIntro x } { y_eq_z = InProIntro x} 
+  = InProIntro x
+
+EqTrans : forall v, a, b, c. (x : WExp v a) -> (y : WExp v b) -> (z : WExp v c)
+           -> {auto x_eq_y : WDict v $ Eq x y} 
+           -> {auto y_eq_z : WDict v $ Eq y z}
+           -> WDict v $ Eq x z
+EqTrans x x x { x_eq_y = InProIntro x } { y_eq_z = InProIntro x} 
+  = InProIntro x  
+-- TODO: Are these cases sound, it seems like a case of non-terminating 
+-- recursion?
+EqTrans x x z { x_eq_y = InProIntro x } { y_eq_z = InIntro   x } 
+  = EqTrans x x z
+EqTrans x y z { x_eq_y = InIntro    x }
+  = EqTrans x y z
