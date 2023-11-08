@@ -240,7 +240,6 @@ arg (Is (Is (Tagged TSuchThat) $$ c)) = PrimFun c (Is $ Tagged TCo)
 arg (Is (Tagged TPromote)) = Tagged TAny
 arg _ = todo
 
-
 -- Injective functions
 -- We call this definition "prim" in that it is not co/contra-variant as it
 -- directly uses `PrimFun`
