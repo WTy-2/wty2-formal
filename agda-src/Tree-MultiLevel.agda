@@ -21,8 +21,9 @@ module Tree-MultiLevel where
 
 data WExpUntyped : Set → Set₁ where
   Ty Co : ∀ {v} → WExpUntyped v
-  _-→_ : ∀ {v} → WExpUntyped v → WExpUntyped v → WExpUntyped v
+  _-→_  : ∀ {v} → WExpUntyped v → WExpUntyped v → WExpUntyped v
   Π_-→_ : ∀ {v} → WExpUntyped v → (v → WExpUntyped v) → WExpUntyped v
+  Lam   : ∀ {v} → (v → WExpUntyped v) → WExpUntyped v
 
 record VarRep : Set₁ where
   constructor ⟨_,_,_⟩
@@ -40,24 +41,24 @@ PolyWExpUntyped = ∀ {v : Set} → WExpUntyped v
 PolyWExp : PolyWExpUntyped → Set₁
 PolyWExp t = ∀ {v} → WExp v t
 
--- Potential, more specific, signature for `lift`
-lift' : ∀ {v t} → (∀ {v'} {f : ∀ {u} → v' u → v} → WExp ⟨ v , v' , f ⟩ t) → WExpUntyped v
+lift' : ∀ {v t} → WExp ⟨ v , const v , id ⟩ t → WExpUntyped v
+-- More understandable (but slightly less specific) type signature for `lift'`
 lift : ∀ {t : PolyWExpUntyped} → PolyWExp t → PolyWExpUntyped
 lift e = lift' e
 
 data WExp where
-  Ty Co : PolyWExp Ty
-  _-→_  : PolyWExp Ty → PolyWExp Ty → PolyWExp Ty
-  Π_-→_ : ∀ {v} → (t : PolyWExp Ty) → (vrep v (lift t) → PolyWExp Ty) → WExp v Ty
+  Ty Co  : ∀ {v} → WExp v Ty
+  _-→_   : ∀ {v} → WExp v Ty → WExp v Ty → WExp v Ty
+  Π_-→_  : ∀ {v} → (t : WExpUntyped $ uvrep v) → (vrep v t → WExp v Ty) 
+         → WExp v Ty
+  Lam    : ∀ {v a b} → (vrep v a → WExp v b) 
+         → WExp v $ a -→ b
+  DepLam : ∀ {v a f} → ((x : vrep v a) → WExp v $ f $ liftv v x) 
+         → WExp v $ Π a -→ f
 
--- I'm pretty confident this function terminates and Agda is just being very
--- silly here
-{-# TERMINATING #-}
-lift' {v} e with e {v' = const v} {f = id}
-... | Ty = Ty
-... | Co = Co
-... | a -→ b = lift a -→ lift b
-... | Π a -→ b = Π lift a -→ b'
-  where
-    b' : v → WExpUntyped v
-    b' var = lift $ b var
+lift' (Ty      ) = Ty
+lift' (Co      ) = Co
+lift' (a -→ b  ) = lift' a -→ lift' b
+lift' (Π a -→ b) = Π a -→ (λ var → lift' (b var))
+lift' (Lam f   ) = Lam (λ var → lift' (f var))
+lift' (DepLam f) = Lam (λ var → lift' (f var))
