@@ -19,46 +19,61 @@ module Tree-MultiLevel where
 -- For now I will try a one-level version (indexed by untyped), which should
 -- enforce correct types, but could perhaps allow incorrect kinds.
 
-data WExpUntyped : Set → Set₁ where
-  Ty Co : ∀ {v} → WExpUntyped v
-  _-→_  : ∀ {v} → WExpUntyped v → WExpUntyped v → WExpUntyped v
-  Π_-→_ : ∀ {v} → WExpUntyped v → (v → WExpUntyped v) → WExpUntyped v
-  Lam   : ∀ {v} → (v → WExpUntyped v) → WExpUntyped v
+data WExp₀ : Set → Set₁ where
+  Ty Co : ∀ {v} → WExp₀ v
+  _-→_  : ∀ {v} → WExp₀ v → WExp₀ v → WExp₀ v
+  Π_-→_ : ∀ {v} → WExp₀ v → (v → WExp₀ v) → WExp₀ v
+  Lam   : ∀ {v} → (v → WExp₀ v) → WExp₀ v
 
-record VarRep : Set₁ where
+∀WExp₀ : Set₁
+∀WExp₀ = ∀ {v : Set} → WExp₀ v
+
+VarRep₀ : Set₁
+VarRep₀ = Set
+
+record VarRep₁ : Set₁ where
   constructor ⟨_,_,_⟩
   field
-    uvrep : Set
-    vrep  : WExpUntyped uvrep → Set
-    liftv : ∀ {t} → vrep t → uvrep
-open VarRep
+    lower : VarRep₀
+    vrep  : WExp₀ lower → Set
+    liftv : ∀ {t} → vrep t → lower
+open VarRep₁
 
-data WExp : (v : VarRep) → WExpUntyped (uvrep v) → Set₁
+data WExp₁ : (v : VarRep₁) → WExp₀ (lower v) → Set₁ where
+  Ty Co  : ∀ {v} → WExp₁ v Ty
+  _-→_   : ∀ {v} → WExp₁ v Ty → WExp₁ v Ty → WExp₁ v Ty
+  Π_-→_  : ∀ {v} → (t : WExp₀ $ lower v) → (vrep v t → WExp₁ v Ty) → WExp₁ v Ty
+  Lam    : ∀ {v a b} → (vrep v a → WExp₁ v b) → WExp₁ v $ a -→ b
+  DepLam : ∀ {v a f} → ((x : vrep v a) → WExp₁ v $ f $ liftv v x) 
+         → WExp₁ v $ Π a -→ f
 
-PolyWExpUntyped : Set₁
-PolyWExpUntyped = ∀ {v : Set} → WExpUntyped v
+∀WExp₁ : ∀WExp₀ → Set₁
+∀WExp₁ t = ∀ {v} → WExp₁ v t
 
-PolyWExp : PolyWExpUntyped → Set₁
-PolyWExp t = ∀ {v} → WExp v t
-
-lift' : ∀ {v t} → WExp ⟨ v , const v , id ⟩ t → WExpUntyped v
+lift' : ∀ {v t} → WExp₁ ⟨ v , const v , id ⟩ t → WExp₀ v
 -- More understandable (but slightly less specific) type signature for `lift'`
-lift : ∀ {t : PolyWExpUntyped} → PolyWExp t → PolyWExpUntyped
+lift : ∀ {t : ∀WExp₀} → ∀WExp₁ t → ∀WExp₀
 lift e = lift' e
-
-data WExp where
-  Ty Co  : ∀ {v} → WExp v Ty
-  _-→_   : ∀ {v} → WExp v Ty → WExp v Ty → WExp v Ty
-  Π_-→_  : ∀ {v} → (t : WExpUntyped $ uvrep v) → (vrep v t → WExp v Ty) 
-         → WExp v Ty
-  Lam    : ∀ {v a b} → (vrep v a → WExp v b) 
-         → WExp v $ a -→ b
-  DepLam : ∀ {v a f} → ((x : vrep v a) → WExp v $ f $ liftv v x) 
-         → WExp v $ Π a -→ f
-
 lift' (Ty      ) = Ty
 lift' (Co      ) = Co
 lift' (a -→ b  ) = lift' a -→ lift' b
 lift' (Π a -→ b) = Π a -→ (λ var → lift' (b var))
 lift' (Lam f   ) = Lam (λ var → lift' (f var))
 lift' (DepLam f) = Lam (λ var → lift' (f var))
+
+record VarRep₂ : Set₁ where
+  constructor ⟨_,_,_⟩
+  field
+    lower : VarRep₁
+    vrep  : WExp₁ lower Ty → Set
+    liftv : ∀ {t} → vrep t → VarRep₁.vrep lower Ty
+open VarRep₂
+
+data WExp₂ : (v : VarRep₂) → WExp₁ (lower v) Ty → Set₁ where
+  Ty Co  : ∀ {v} → WExp₂ v Ty
+  _-→_   : ∀ {v} → WExp₂ v Ty → WExp₂ v Ty → WExp₂ v Ty
+  Lam    : ∀ {v a b} → (vrep v a → WExp₂ v b) → WExp₂ v $ a -→ b
+  Π_-→_  : ∀ {v} → (t : WExp₁ (lower v) Ty) → (vrep v t → WExp₂ v Ty)
+         → WExp₂ v Ty
+  DepLam : ∀ {v a f} → ((x : vrep (lower v) a) → WExp₂ v $ f $ x) 
+         → WExp₂ v $ Π a -→ f
